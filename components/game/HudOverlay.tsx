@@ -10,12 +10,14 @@ export default function HudOverlay() {
   const [objective, setObjective] = useState(
     "Walk around with arrows or WASD. Find the cottage.",
   );
+  const [activeScene, setActiveScene] = useState<"island" | "caverns">("island");
   const [charms, setCharms] = useState<Charm[]>([]);
   const [needed, setNeeded] = useState(4);
 
   useEffect(() => {
     const off1 = gameBus.on("hp:update", (p) => setHp(p));
     const off2 = gameBus.on("objective:update", (p) => setObjective(p.text));
+    const offScene = gameBus.on("scene:enter", ({ scene }) => setActiveScene(scene));
     const off3 = gameBus.on("charm:collected", (p) => {
       setCharms((prev) =>
         prev.find((c) => c.id === p.id) ? prev : [...prev, { id: p.id, label: p.label }],
@@ -25,6 +27,7 @@ export default function HudOverlay() {
     return () => {
       off1();
       off2();
+      offScene();
       off3();
     };
   }, []);
@@ -64,14 +67,16 @@ export default function HudOverlay() {
         </div>
       </div>
 
-      <div className="absolute top-3 left-1/2 -translate-x-1/2">
-        <div className="pixel-panel max-w-md px-4 py-2 text-center text-xs">
-          <span className="mr-2 inline-block font-bold uppercase tracking-wider">
-            Mission
-          </span>
-          <span>{objective}</span>
+      {activeScene !== "caverns" && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2">
+          <div className="pixel-panel max-w-md px-4 py-2 text-center text-xs">
+            <span className="mr-2 inline-block font-bold uppercase tracking-wider">
+              Mission
+            </span>
+            <span>{objective}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="absolute top-3 right-3">
         <div className="pixel-panel px-3 py-2 text-xs">

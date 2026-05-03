@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
+import { gameBus } from "@/lib/game/eventBus";
 import HudOverlay from "./HudOverlay";
 import DialogOverlay from "./DialogOverlay";
 import MysterySolved from "./MysterySolved";
@@ -12,6 +13,7 @@ const PhaserGame = dynamic(() => import("./PhaserGame"), { ssr: false });
 
 export default function GameShell() {
   const [started, setStarted] = useState(false);
+  const [activeScene, setActiveScene] = useState<"island" | "caverns">("island");
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -27,8 +29,19 @@ export default function GameShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  useEffect(() => {
+    const off = gameBus.on("scene:enter", ({ scene }) => {
+      setActiveScene(scene);
+    });
+    return () => off();
+  }, []);
+
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-[#a6d8d3]">
+    <div
+      className={`relative h-dvh w-full overflow-hidden ${
+        activeScene === "caverns" ? "bg-[#1f1b2c]" : "bg-[#a6d8d3]"
+      }`}
+    >
       {!started ? (
         <TitleScreen onStart={() => setStarted(true)} />
       ) : (

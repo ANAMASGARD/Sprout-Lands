@@ -1,10 +1,10 @@
 import * as Phaser from "phaser";
-import { COLORS } from "../constants";
+import { COLORS, VIEW_H, VIEW_W } from "../constants";
 import { ASSET_KEYS, EMOJI_FRAMES } from "../assets";
 import { gameBus } from "../eventBus";
 
-const CAVERN_W = 720;
-const CAVERN_H = 540;
+const CAVERN_W = VIEW_W;
+const CAVERN_H = VIEW_H;
 
 export class CavernsScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
@@ -30,13 +30,32 @@ export class CavernsScene extends Phaser.Scene {
     this.cameras.main.fadeIn(280, 0, 0, 0);
 
     const bg = this.add.graphics();
-    bg.fillStyle(0x29243a, 1);
+    bg.fillStyle(0x241f37, 1);
     bg.fillRect(0, 0, CAVERN_W, CAVERN_H);
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 140; i++) {
       const sx = Phaser.Math.Between(0, CAVERN_W);
       const sy = Phaser.Math.Between(0, CAVERN_H);
-      bg.fillStyle(0x4b3f6e, 0.5);
+      bg.fillStyle(0x4b3f6e, 0.42);
       bg.fillCircle(sx, sy, Phaser.Math.Between(1, 2));
+    }
+    for (let i = 0; i < 24; i++) {
+      const x = Phaser.Math.Between(28, CAVERN_W - 28);
+      const y = Phaser.Math.Between(34, CAVERN_H - 34);
+      const crystal = this.add.triangle(
+        x,
+        y,
+        0,
+        14,
+        8,
+        -8,
+        -8,
+        -8,
+        Phaser.Math.Between(0x65d8ff, 0x8bd6ff),
+      );
+      crystal.setAlpha(0.65);
+      crystal.setDepth(1);
+      const glow = this.add.circle(x, y - 2, 8, 0x9cc9ff, 0.16);
+      glow.setDepth(0);
     }
 
     this.platforms = this.physics.add.staticGroup();
@@ -103,24 +122,6 @@ export class CavernsScene extends Phaser.Scene {
       repeat: -1,
     });
     this.charm = charmContainer;
-
-    this.add
-      .text(CAVERN_W / 2, 24, "Climb to grab the WAVE CHARM", {
-        fontFamily: "Sprout Lands, monospace",
-        fontSize: "14px",
-        color: "#fbeec1",
-      })
-      .setOrigin(0.5)
-      .setDepth(100);
-
-    this.add
-      .text(CAVERN_W / 2, 48, "Move: ←→ / A D     Jump: ↑ / W / Space", {
-        fontFamily: "Sprout Lands, monospace",
-        fontSize: "10px",
-        color: "#fbeec1",
-      })
-      .setOrigin(0.5)
-      .setDepth(100);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys({
