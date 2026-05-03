@@ -13,7 +13,9 @@ const PhaserGame = dynamic(() => import("./PhaserGame"), { ssr: false });
 
 export default function GameShell() {
   const [started, setStarted] = useState(false);
-  const [activeScene, setActiveScene] = useState<"island" | "caverns">("island");
+  const [activeScene, setActiveScene] = useState<"island" | "caverns" | "library">(
+    "island",
+  );
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -39,7 +41,11 @@ export default function GameShell() {
   return (
     <div
       className={`relative h-dvh w-full overflow-hidden ${
-        activeScene === "caverns" ? "bg-[#1f1b2c]" : "bg-[#a6d8d3]"
+        activeScene === "caverns"
+          ? "bg-[#1f1b2c]"
+          : activeScene === "library"
+            ? "bg-[#3a2d22]"
+            : "bg-[#a6d8d3]"
       }`}
     >
       {!started ? (

@@ -17,15 +17,15 @@ export type PuzzleDefinition = {
 export const PUZZLES: Record<PuzzleId, PuzzleDefinition> = {
   [PUZZLE_IDS.cottage]: {
     id: PUZZLE_IDS.cottage,
-    label: "The Cottage Diary",
+    label: "The Library Ledger",
     charmLabel: "Sun Charm",
     intro: [
-      "A weathered diary rests on the porch.",
-      "It reads: 'To find Gaurav Chaudhary's number, follow the SUN first.'",
-      "A small Sun Charm slips out of the pages.",
+      "Welcome to the old library, little traveler.",
+      "The Memory Codex glows with six rune words.",
+      "Remember the light sequence and repeat it correctly.",
     ],
     solved: ["You picked up the SUN CHARM.", "Where to next?"],
-    objective: "Inspect the cottage diary",
+    objective: "Solve the Memory Codex sequence in the library",
     symbol: "sun",
   },
   [PUZZLE_IDS.garden]: {

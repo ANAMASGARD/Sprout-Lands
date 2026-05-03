@@ -15,6 +15,7 @@ export default function PhaserGame() {
       const { BootScene } = await import("@/lib/game/scenes/BootScene");
       const { IslandScene } = await import("@/lib/game/scenes/IslandScene");
       const { CavernsScene } = await import("@/lib/game/scenes/CavernsScene");
+      const { LibraryScene } = await import("@/lib/game/scenes/LibraryScene");
 
       if (cancelled || !containerRef.current) return;
 
@@ -38,7 +39,7 @@ export default function PhaserGame() {
             debug: false,
           },
         },
-        scene: [BootScene, IslandScene, CavernsScene],
+        scene: [BootScene, IslandScene, CavernsScene, LibraryScene],
       });
 
       gameRef.current = game;

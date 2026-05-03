@@ -87,7 +87,7 @@ export class IslandScene extends Phaser.Scene {
     this.placeWaterEdges();
     this.placePaths();
     this.placeDecor();
-    this.placeCottage();
+    this.placeLibraryEntrance();
     this.player = this.physics.add.sprite(
       MAP_W / 2,
       MAP_H / 2 + TILE * 2,
@@ -149,6 +149,11 @@ export class IslandScene extends Phaser.Scene {
       gameBus.on("scene:return-from-caverns", ({ collected }) => {
         if (collected) {
           this.completePuzzle(PUZZLE_IDS.caverns);
+        }
+      }),
+      gameBus.on("scene:return-from-library", ({ collected }) => {
+        if (collected) {
+          this.completePuzzle(PUZZLE_IDS.cottage);
         }
       }),
     );
@@ -365,7 +370,7 @@ export class IslandScene extends Phaser.Scene {
     this.add.circle(x, y - 1, 1, COLORS.white).setDepth(8);
   }
 
-  private placeCottage() {
+  private placeLibraryEntrance() {
     const baseX = 5 * TILE + 16;
     const baseY = 4 * TILE + 16;
 
@@ -415,7 +420,7 @@ export class IslandScene extends Phaser.Scene {
     this.solids.add(wallBody);
 
     const sign = this.add
-      .text(baseX, baseY + 56, "DIARY", {
+      .text(baseX, baseY + 56, "LIBRARY", {
         fontFamily: "Sprout Lands, monospace",
         fontSize: "12px",
         color: "#4a3528",
@@ -430,23 +435,19 @@ export class IslandScene extends Phaser.Scene {
     this.physics.add.existing(zone, true);
     this.interactables.push({
       zone,
-      prompt: "Read diary",
-      onInteract: () => this.runCottagePuzzle(),
+      prompt: "Enter library",
+      onInteract: () => this.enterLibrary(),
     });
   }
 
-  private runCottagePuzzle() {
-    if (this.collectedCharms.has(PUZZLE_IDS.cottage)) {
-      gameBus.emit("dialog:show", {
-        speaker: "Teemo",
-        lines: ["I already have the Sun Charm.", "It hums softly..."],
+  private enterLibrary() {
+    gameBus.emit("scene:enter", { scene: "library" });
+    this.cameras.main.fadeOut(300, 0, 0, 0);
+    this.time.delayedCall(320, () => {
+      this.scene.sleep();
+      this.scene.run("LibraryScene", {
+        solved: this.collectedCharms.has(PUZZLE_IDS.cottage),
       });
-      return;
-    }
-    const def = PUZZLES[PUZZLE_IDS.cottage];
-    gameBus.emit("dialog:show", { speaker: "Teemo", lines: def.intro });
-    this.time.delayedCall(400, () => {
-      this.completePuzzle(PUZZLE_IDS.cottage);
     });
   }
 

@@ -8,9 +8,11 @@ type Charm = { id: string; label: string };
 export default function HudOverlay() {
   const [hp, setHp] = useState({ current: 3, max: 3 });
   const [objective, setObjective] = useState(
-    "Walk around with arrows or WASD. Find the cottage.",
+    "Walk around with arrows or WASD. Find the library.",
   );
-  const [activeScene, setActiveScene] = useState<"island" | "caverns">("island");
+  const [activeScene, setActiveScene] = useState<"island" | "caverns" | "library">(
+    "island",
+  );
   const [charms, setCharms] = useState<Charm[]>([]);
   const [needed, setNeeded] = useState(4);
 

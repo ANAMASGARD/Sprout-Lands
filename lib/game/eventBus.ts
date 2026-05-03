@@ -13,8 +13,9 @@ export type GameEvents = {
   };
   "hp:update": { current: number; max: number };
   "mystery:solved": { reward: string };
-  "scene:enter": { scene: "island" | "caverns" };
+  "scene:enter": { scene: "island" | "caverns" | "library" };
   "scene:return-from-caverns": { collected: boolean };
+  "scene:return-from-library": { collected: boolean };
   "input:virtual": {
     left: boolean;
     right: boolean;
