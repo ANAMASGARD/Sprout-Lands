@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sprout Mystery Game
 
-## Getting Started
+A browser-playable mystery puzzle game built with Next.js + Phaser, inspired by the Sprout Lands UI style.
 
-First, run the development server:
+## Story
+Teemo the cat must recover the missing Moonbell by solving four mystery puzzles around Sprout Island:
+1. Cottage diary clue
+2. Garden step-sequence puzzle
+3. Gravity cavern platform challenge
+4. Shrine symbol-order puzzle
+
+After all four charms are collected, the center chest opens and shows the reward popup with your configured phone number.
+
+## Tech Stack
+- Next.js 16 (App Router)
+- React 19
+- Phaser 3 (game engine + Arcade physics)
+- Tailwind 4 for overlays and UI shell
+
+## Asset Source and License
+Sprout Lands UI assets are by Cup Nooble:
+- https://cupnooble.itch.io/sprout-lands-ui-pack
+
+Important license notes for the free/basic pack:
+- non-commercial usage only
+- do not redistribute/resell assets
+- credit Cup Nooble
+
+## Local Development
+Install dependencies and run:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Build Checks
+```bash
+npm run lint
+npm run build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Configure Reward Phone Number
+Set this environment variable:
 
-## Learn More
+```bash
+NEXT_PUBLIC_REWARD_PHONE_NUMBER="+91 98765 43210"
+```
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Since this is `NEXT_PUBLIC_*`, it is visible in the client bundle and browser.
 
 ## Deploy on Vercel
+1. Push this repo to GitHub/GitLab/Bitbucket.
+2. Import it into Vercel.
+3. Add env var in Vercel Project Settings:
+   - `NEXT_PUBLIC_REWARD_PHONE_NUMBER`
+4. Deploy.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+No additional server services are required.
