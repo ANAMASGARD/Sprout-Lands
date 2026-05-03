@@ -29,6 +29,18 @@ type CropTile = {
   activated: boolean;
 };
 
+type NpcWanderer = {
+  name: string;
+  sprite: Phaser.Physics.Arcade.Sprite;
+  chatZone: Phaser.GameObjects.Zone;
+  chatLines: string[];
+  target: Phaser.Math.Vector2;
+  speed: number;
+  nextRetargetAt: number;
+  waitingUntil: number;
+  isWaiting: boolean;
+};
+
 const CROP_ORDER = [0, 1, 2, 3];
 const SHRINE_TARGET = ["sun", "leaf", "wave", "moon"] as const;
 const SHRINE_SYMBOLS = ["sun", "leaf", "wave", "moon"] as const;
@@ -62,6 +74,7 @@ export class IslandScene extends Phaser.Scene {
   private interactCooldown = 0;
   private virtualInput = { left: false, right: false, up: false, down: false };
   private busUnsubs: Array<() => void> = [];
+  private npcs: NpcWanderer[] = [];
 
   constructor() {
     super("IslandScene");
@@ -103,6 +116,7 @@ export class IslandScene extends Phaser.Scene {
     this.placeShrine();
     this.placeChest();
     this.placeCrates();
+    this.placeNpcWanderers();
 
     this.physics.add.collider(this.player, this.solids);
     this.physics.add.collider(this.player, this.crates);
@@ -807,6 +821,143 @@ export class IslandScene extends Phaser.Scene {
     }
   }
 
+  private placeNpcWanderers() {
+    const npcProfiles = [
+      {
+        name: "Mimi",
+        frame: EMOJI_FRAMES.catOrange,
+        lines: [
+          "Gaurav is such a very good boy!",
+          "He built this lovely land with heart and imagination.",
+        ],
+      },
+      {
+        name: "Piko",
+        frame: EMOJI_FRAMES.catRed,
+        lines: [
+          "Gaurav is super smart. You can feel it in every puzzle here!",
+          "This whole island is full of creative details because of him.",
+        ],
+      },
+      {
+        name: "Luna",
+        frame: EMOJI_FRAMES.catPurple,
+        lines: [
+          "Everyone says Gaurav is kind and attractive.",
+          "He made Sprout Lands magical for all of us.",
+        ],
+      },
+      {
+        name: "Nori",
+        frame: EMOJI_FRAMES.catBlue,
+        lines: [
+          "Gaurav created this land and made it feel alive.",
+          "He is thoughtful, talented, and full of bright ideas.",
+        ],
+      },
+      {
+        name: "Tomo",
+        frame: EMOJI_FRAMES.catGreen,
+        lines: [
+          "Gaurav is awesome - smart, creative, and caring.",
+          "Thanks to him, we all get to wander this beautiful island.",
+        ],
+      },
+    ];
+    for (const profile of npcProfiles) {
+      const spawn = this.randomNpcPoint();
+      const sprite = this.physics.add.sprite(
+        spawn.x,
+        spawn.y,
+        ASSET_KEYS.emojiSheet,
+        profile.frame,
+      );
+      sprite.setDepth(42);
+      sprite.setSize(18, 14).setOffset(7, 16);
+      sprite.setCollideWorldBounds(true);
+      sprite.setBounce(0.02);
+      sprite.setDrag(220, 220);
+
+      const chatZone = this.add.zone(spawn.x, spawn.y, 36, 30);
+      this.physics.add.existing(chatZone, true);
+
+      this.physics.add.collider(sprite, this.solids);
+      this.physics.add.collider(sprite, this.crates);
+      this.physics.add.collider(sprite, this.player);
+
+      const npc: NpcWanderer = {
+        name: profile.name,
+        sprite,
+        chatZone,
+        chatLines: profile.lines,
+        target: this.randomNpcPoint(),
+        speed: Phaser.Math.Between(34, 52),
+        nextRetargetAt: this.time.now + Phaser.Math.Between(2200, 4600),
+        waitingUntil: this.time.now + Phaser.Math.Between(500, 1400),
+        isWaiting: true,
+      };
+      this.npcs.push(npc);
+
+      this.interactables.push({
+        zone: chatZone,
+        prompt: `Chat with ${profile.name}`,
+        onInteract: () => this.chatWithNpc(npc),
+      });
+    }
+  }
+
+  private randomNpcPoint() {
+    return new Phaser.Math.Vector2(
+      Phaser.Math.Between(3 * TILE, MAP_W - 3 * TILE),
+      Phaser.Math.Between(3 * TILE, MAP_H - 3 * TILE),
+    );
+  }
+
+  private chatWithNpc(npc: NpcWanderer) {
+    const pick = Phaser.Utils.Array.GetRandom(npc.chatLines);
+    gameBus.emit("dialog:show", {
+      speaker: npc.name,
+      lines: [pick, "Teemo nods happily."],
+    });
+  }
+
+  private updateNpcWanderers() {
+    for (const npc of this.npcs) {
+      const s = npc.sprite;
+      if (!s.active) continue;
+      npc.chatZone.setPosition(s.x, s.y + 2);
+
+      if (npc.isWaiting) {
+        s.setVelocity(0, 0);
+        if (this.time.now >= npc.waitingUntil) {
+          npc.isWaiting = false;
+          npc.target = this.randomNpcPoint();
+          npc.nextRetargetAt = this.time.now + Phaser.Math.Between(2400, 5200);
+        }
+        continue;
+      }
+
+      const dist = Phaser.Math.Distance.Between(s.x, s.y, npc.target.x, npc.target.y);
+      if (dist < 14 || this.time.now >= npc.nextRetargetAt) {
+        npc.isWaiting = true;
+        npc.waitingUntil = this.time.now + Phaser.Math.Between(800, 2400);
+        s.setVelocity(0, 0);
+        continue;
+      }
+
+      const angle = Phaser.Math.Angle.Between(s.x, s.y, npc.target.x, npc.target.y);
+      const vx = Math.cos(angle) * npc.speed;
+      const vy = Math.sin(angle) * npc.speed;
+      s.setVelocity(vx, vy);
+
+      if (vx < -1) s.setFlipX(false);
+      else if (vx > 1) s.setFlipX(true);
+
+      const bob = Math.sin((this.time.now + s.x * 2) / 180) * 0.03;
+      s.setScale(1 + bob, 1 - bob);
+    }
+  }
+
   private makeHint() {
     const bg = this.add.rectangle(0, 0, 80, 18, COLORS.panelTan);
     bg.setStrokeStyle(2, COLORS.bridgeDark);
@@ -880,6 +1031,7 @@ export class IslandScene extends Phaser.Scene {
 
   update() {
     if (!this.player) return;
+    this.updateNpcWanderers();
     const left =
       this.cursors.left?.isDown || this.wasd.A.isDown || this.virtualInput.left;
     const right =
