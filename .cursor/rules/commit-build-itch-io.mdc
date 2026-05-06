@@ -1,0 +1,18 @@
+---
+description: Require passing build before commits; defer itch.io page copy until milestones land
+alwaysApply: true
+---
+
+# Commit gate and itch.io publishing
+
+## Build before commits
+
+Before creating the next git commit:
+
+- Run `npm run build` and fix failures until it exits cleanly.
+- Do not start staging or authoring a commit while the tree does not produce a passing production build.
+
+## itch.io listing copy
+
+- Do **not** update the game's itch.io store description/page text until **Commits 5 and 9** have landed on the tracked branch/history used for releases.
+- After both commits are in, revise itch.io description to match those changes.

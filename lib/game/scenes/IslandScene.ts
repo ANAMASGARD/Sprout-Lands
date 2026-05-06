@@ -12,10 +12,14 @@ import {
   REWARD_PHONE_NUMBER,
   RUN_DURATION_MS,
   HP_MAX,
-  HUNT_AT_REMAINING_MS,
   PARANOIA_AT_REMAINING_MS,
   GARDEN_COMMIT_MS,
   PRESSURE_PENALTY_GARDEN_FAIL_SEC,
+  IMPOSTER_KILL_GRACE_MS,
+  IMPOSTER_KILL_CHECK_MIN_MS,
+  IMPOSTER_KILL_CHECK_MAX_MS,
+  IMPOSTER_KILL_RANGE_PX,
+  IMPOSTER_KILL_CHANCE,
   STAR_2_REMAINING_MS,
   STAR_3_REMAINING_MS,
   type PuzzleId,
@@ -55,10 +59,6 @@ type NpcWanderer = {
   nextRetargetAt: number;
   waitingUntil: number;
   isWaiting: boolean;
-  /** Hunt Mode (imposter only): unstuck detour */
-  huntLowVxSince?: number;
-  huntDetourUntil?: number;
-  huntDetourTarget?: Phaser.Math.Vector2;
 };
 
 const SHRINE_TARGET = ["sun", "leaf", "wave", "moon"] as const;
@@ -99,9 +99,10 @@ export class IslandScene extends Phaser.Scene {
   private lastRemainingMs = RUN_DURATION_MS;
   private imposterName = "";
   private accusationUsed = false;
+  private accusationAttempts = 0;
+  private whisperStoneCooldownUntil = 0;
   private accusationCorrect = false;
   private playerHp = HP_MAX;
-  private huntHumStarted = false;
   private gardenCommitDeadline: number | null = null;
   private gardenBarFill: Phaser.GameObjects.Rectangle | null = null;
   private gardenBarMaxW = TILE * 4;
@@ -109,6 +110,11 @@ export class IslandScene extends Phaser.Scene {
   private gardenBarY = 0;
   private chestInteractable: Interactable | null = null;
   private whisperInteractable: Interactable | null = null;
+  private killSequenceStarted = false;
+  private imposterKillGraceUntil = 0;
+  private nextRandomKillCheckAt = 0;
+  private static readonly MAX_ACCUSATION_ATTEMPTS = 3;
+  private static readonly WHISPER_STONE_COOLDOWN_MS = 30_000;
 
   constructor() {
     super("IslandScene");
@@ -185,7 +191,7 @@ export class IslandScene extends Phaser.Scene {
         "Mrow… the tide is rising!",
         "I need Gaurav Chaudhary's phone number before the island sinks.",
         "Four charms seal the chest. One of the cats is lying — ask around.",
-        "Use Arrows or WASD to walk. Press E to interact. Listen for the Whisper Stone.",
+        "Use Arrows or WASD to walk. Press E to interact. Stay alert — the imposter may strike suddenly.",
       ],
     });
 
@@ -956,6 +962,10 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private placeNpcWanderers() {
+    this.imposterKillGraceUntil = this.time.now + IMPOSTER_KILL_GRACE_MS;
+    this.nextRandomKillCheckAt =
+      this.imposterKillGraceUntil +
+      Phaser.Math.Between(IMPOSTER_KILL_CHECK_MIN_MS, IMPOSTER_KILL_CHECK_MAX_MS);
     this.imposterName = Phaser.Utils.Array.GetRandom([...NPC_NAMES]);
     const npcProfiles = [
       { name: "Mimi" as const, frame: EMOJI_FRAMES.catOrange },
@@ -1026,12 +1036,42 @@ export class IslandScene extends Phaser.Scene {
       prompt: "Touch the Whisper Stone",
       onInteract: () => {
         if (this.inputFrozen) return;
-        if (this.accusationUsed) {
+        if (this.accusationCorrect) {
           gameBus.emit("dialog:show", {
             speaker: "Teemo",
-            lines: ["The stone has gone silent.", "I've already cast my one accusation."],
+            lines: [
+              "The stone has gone silent permanently.",
+              "Its work is done. The liar was exposed.",
+            ],
           });
           return;
+        }
+        if (this.accusationAttempts >= IslandScene.MAX_ACCUSATION_ATTEMPTS) {
+          gameBus.emit("dialog:show", {
+            speaker: "Teemo",
+            lines: [
+              "The Whisper Stone has gone silent permanently.",
+              "I spent all 3 accusations and it will not answer again.",
+            ],
+          });
+          return;
+        }
+        if (this.time.now < this.whisperStoneCooldownUntil) {
+          const secsLeft = Math.ceil((this.whisperStoneCooldownUntil - this.time.now) / 1000);
+          if (this.whisperInteractable) {
+            this.whisperInteractable.prompt = `Whisper Stone: Silent for ${secsLeft}s`;
+          }
+          gameBus.emit("dialog:show", {
+            speaker: "Teemo",
+            lines: [
+              `Wrong liar. The stone has gone silent for the next ${secsLeft} seconds.`,
+              "Wait a bit, then accuse again.",
+            ],
+          });
+          return;
+        }
+        if (this.whisperInteractable) {
+          this.whisperInteractable.prompt = "Touch the Whisper Stone";
         }
         gameBus.emit("imposter:accuse-open", { names: [...NPC_NAMES] });
       },
@@ -1041,14 +1081,19 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private handleAccusationPick(accusedName: string) {
-    if (!this.scene.isActive() || this.accusationUsed) return;
-    this.accusationUsed = true;
-    if (this.whisperInteractable) {
-      this.whisperInteractable.prompt = "The stone has gone silent.";
-    }
+    // Use scene systems activity check to avoid lifecycle races
+    // where ScenePlugin can be null during teardown/remount.
+    if (!this.sys?.isActive()) return;
+    if (this.accusationCorrect) return;
+    if (this.accusationAttempts >= IslandScene.MAX_ACCUSATION_ATTEMPTS) return;
+    if (this.time.now < this.whisperStoneCooldownUntil) return;
     const correct = accusedName === this.imposterName;
     this.accusationCorrect = correct;
     if (correct) {
+      this.accusationUsed = true;
+      if (this.whisperInteractable) {
+        this.whisperInteractable.prompt = "Whisper Stone: Liar exposed";
+      }
       this.playerHp = Math.min(HP_MAX, this.playerHp + 1);
       gameBus.emit("hp:update", { current: this.playerHp, max: HP_MAX });
       gameBus.emit("pressure:bonus", { seconds: 45, reason: "Exposed the liar" });
@@ -1061,15 +1106,35 @@ export class IslandScene extends Phaser.Scene {
       });
       this.applyShrineShortcutIfEligible();
     } else {
+      this.accusationAttempts += 1;
       this.playerHp -= 1;
       gameBus.emit("hp:update", { current: this.playerHp, max: HP_MAX });
-      gameBus.emit("dialog:show", {
-        speaker: "Teemo",
-        lines: [
-          `${accusedName} stares back, offended.`,
-          "That wasn't the liar… Teemo's heart sinks.",
-        ],
-      });
+      if (this.accusationAttempts >= IslandScene.MAX_ACCUSATION_ATTEMPTS) {
+        this.accusationUsed = true;
+        if (this.whisperInteractable) {
+          this.whisperInteractable.prompt = "Whisper Stone: Silent permanently";
+        }
+        gameBus.emit("dialog:show", {
+          speaker: "Teemo",
+          lines: [
+            `${accusedName} stares back, offended.`,
+            "Wrong again. The Whisper Stone has gone silent for this run.",
+          ],
+        });
+      } else {
+        this.whisperStoneCooldownUntil = this.time.now + IslandScene.WHISPER_STONE_COOLDOWN_MS;
+        if (this.whisperInteractable) {
+          this.whisperInteractable.prompt = `Whisper Stone: Recharging (${IslandScene.WHISPER_STONE_COOLDOWN_MS / 1000}s)`;
+        }
+        gameBus.emit("dialog:show", {
+          speaker: "Teemo",
+          lines: [
+            `${accusedName} stares back, offended.`,
+            `Wrong liar. The stone has gone silent for the next ${IslandScene.WHISPER_STONE_COOLDOWN_MS / 1000} seconds.`,
+            `${IslandScene.MAX_ACCUSATION_ATTEMPTS - this.accusationAttempts} accusations remain.`,
+          ],
+        });
+      }
       if (this.playerHp <= 0) {
         gameBus.emit("game:lost", {
           cause: "wrong-accusation-hp",
@@ -1096,76 +1161,69 @@ export class IslandScene extends Phaser.Scene {
   private imposterContactCooldown = 0;
 
   private onImposterContactDamage() {
-    if (this.inputFrozen || this.time.now < this.imposterContactCooldown) return;
+    if (this.inputFrozen || this.killSequenceStarted) return;
+    if (this.accusationCorrect) return;
+    if (this.time.now < this.imposterContactCooldown) return;
     this.imposterContactCooldown = this.time.now + 1400;
-    this.playerHp -= 1;
-    gameBus.emit("hp:update", { current: this.playerHp, max: HP_MAX });
-    this.cameras.main.shake(200, 0.012);
-    if (this.playerHp <= 0) {
+    this.killSequenceStarted = true;
+    this.inputFrozen = true;
+    gameBus.emit("input:freeze", { frozen: true });
+
+    const imposter = this.npcs.find((n) => n.name === this.imposterName);
+    this.player.setVelocity(0, 0);
+    if (imposter?.sprite?.active) {
+      imposter.sprite.setVelocity(0, 0);
+      this.tweens.add({
+        targets: imposter.sprite,
+        scaleX: 1.28,
+        scaleY: 0.72,
+        duration: 120,
+        yoyo: true,
+        repeat: 1,
+      });
+    }
+
+    this.playSfx(ASSET_KEYS.sfxCropPop, 0.6);
+    this.tweens.add({
+      targets: this.player,
+      alpha: 0.3,
+      duration: 320,
+      yoyo: true,
+      repeat: 1,
+      ease: "sine.inOut",
+    });
+    this.cameras.main.shake(260, 0.016);
+    this.cameras.main.flash(220, 255, 60, 60);
+
+    this.time.delayedCall(360, () => {
       gameBus.emit("game:lost", {
         cause: "imposter-contact",
-        reason: "The imposter caught Teemo — it's over.",
+        reason: "The imposter stepped in and took Teemo out.",
       });
-      gameBus.emit("input:freeze", { frozen: true });
-    }
+    });
   }
 
-  private updateImposterHunt(npc: NpcWanderer) {
-    const s = npc.sprite;
-    npc.chatZone.setPosition(s.x, s.y + 2);
-    if (!this.huntHumStarted) {
-      this.huntHumStarted = true;
-      gameBus.emit("imposter:hunt-start", {});
-    }
+  private maybeTriggerRandomImposterKill() {
+    if (!this.player?.active || !this.scene || !this.scene.isActive()) return;
+    if (this.inputFrozen || this.killSequenceStarted || this.accusationCorrect) return;
+    if (this.time.now < this.imposterKillGraceUntil) return;
+    if (this.time.now < this.nextRandomKillCheckAt) return;
 
-    const px = this.player.x;
-    const py = this.player.y;
+    this.nextRandomKillCheckAt =
+      this.time.now +
+      Phaser.Math.Between(IMPOSTER_KILL_CHECK_MIN_MS, IMPOSTER_KILL_CHECK_MAX_MS);
+    const imposter = this.npcs.find((n) => n.name === this.imposterName);
+    if (!imposter?.sprite?.active) return;
 
-    if (npc.huntDetourUntil !== undefined && this.time.now < npc.huntDetourUntil) {
-      const tx = npc.huntDetourTarget!.x;
-      const ty = npc.huntDetourTarget!.y;
-      const dist = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
-      if (dist < 10) {
-        npc.huntDetourUntil = undefined;
-      } else {
-        const ang = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
-        const sp = npc.speed * 1.1;
-        s.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
-      }
-    } else {
-      npc.huntDetourUntil = undefined;
-      const angle = Phaser.Math.Angle.Between(s.x, s.y, px, py);
-      const huntSpeed = npc.speed * 1.35;
-      s.setVelocity(Math.cos(angle) * huntSpeed, Math.sin(angle) * huntSpeed);
-    }
-
-    const body = s.body as Phaser.Physics.Arcade.Body;
-    const v2 = body.velocity.x * body.velocity.x + body.velocity.y * body.velocity.y;
-    const distP = Phaser.Math.Distance.Between(s.x, s.y, px, py);
-    if (distP > 22 && v2 < 25) {
-      if (npc.huntLowVxSince === undefined) npc.huntLowVxSince = this.time.now;
-      else if (this.time.now - npc.huntLowVxSince > 500) {
-        npc.huntDetourUntil = this.time.now + 1000;
-        npc.huntDetourTarget = new Phaser.Math.Vector2(
-          s.x + Phaser.Math.Between(-60, 60),
-          s.y + Phaser.Math.Between(-60, 60),
-        );
-        npc.huntLowVxSince = undefined;
-      }
-    } else {
-      npc.huntLowVxSince = undefined;
-    }
-
-    const vx = body.velocity.x;
-    if (vx < -1) s.setFlipX(false);
-    else if (vx > 1) s.setFlipX(true);
-
-    if (distP < 20) {
-      this.onImposterContactDamage();
-    }
-
-    const bob = Math.sin(this.time.now / 55) * 0.09;
-    s.setScale(1 + bob, 1 - bob);
+    const dist = Phaser.Math.Distance.Between(
+      this.player.x,
+      this.player.y,
+      imposter.sprite.x,
+      imposter.sprite.y,
+    );
+    if (dist > IMPOSTER_KILL_RANGE_PX) return;
+    if (Phaser.Math.RND.frac() > IMPOSTER_KILL_CHANCE) return;
+    this.onImposterContactDamage();
   }
 
   private randomNpcPoint() {
@@ -1205,14 +1263,6 @@ export class IslandScene extends Phaser.Scene {
     for (const npc of this.npcs) {
       const s = npc.sprite;
       if (!s.active) continue;
-
-      if (
-        npc.name === this.imposterName &&
-        this.lastRemainingMs <= HUNT_AT_REMAINING_MS
-      ) {
-        this.updateImposterHunt(npc);
-        continue;
-      }
 
       npc.chatZone.setPosition(s.x, s.y + 2);
 
@@ -1337,6 +1387,7 @@ export class IslandScene extends Phaser.Scene {
     }
 
     this.updateNpcWanderers();
+    this.maybeTriggerRandomImposterKill();
     const canMove = !this.inputFrozen;
     const left =
       canMove &&

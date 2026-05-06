@@ -22,6 +22,7 @@ export const ASSET_KEYS = {
   sfxCropPop: "sfx_crop_pop",
   sfxJump: "sfx_jump",
   sfxLevelClear: "sfx_level_clear",
+  sfxLose: "sfx_lose",
 } as const;
 
 export type AssetKey = (typeof ASSET_KEYS)[keyof typeof ASSET_KEYS];
@@ -50,6 +51,7 @@ export const ASSET_PATHS: Record<AssetKey, string> = {
   sfx_crop_pop: "/assets/audio/mixkit-video-game-blood-pop-2361.wav",
   sfx_jump: "/assets/audio/mixkit-player-jumping-in-a-video-game-2043.wav",
   sfx_level_clear: "/assets/audio/mixkit-video-game-treasure-2066.wav",
+  sfx_lose: "/assets/audio/mixkit-player-losing-or-failing-2042.wav",
 };
 
 export const EMOJI_FRAMES = {

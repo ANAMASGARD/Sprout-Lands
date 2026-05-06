@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 import { RUN_DURATION_MS } from "@/lib/game/constants";
+import { ASSET_PATHS } from "@/lib/game/assets";
 import type { GameLostCause } from "@/lib/game/eventBus";
 import { gameBus } from "@/lib/game/eventBus";
 import DialogOverlay from "./DialogOverlay";
@@ -150,6 +151,15 @@ export default function GameShell() {
   useEffect(() => {
     const off = gameBus.on("game:lost", ({ cause, reason }) => {
       setGameOver({ cause, reason });
+      if (cause === "timeout" || cause === "imposter-contact") {
+        try {
+          const audio = new Audio(ASSET_PATHS.sfx_lose);
+          audio.volume = 0.55;
+          void audio.play();
+        } catch {
+          // Ignore autoplay restrictions and continue rendering game-over UI.
+        }
+      }
     });
     return () => off();
   }, []);

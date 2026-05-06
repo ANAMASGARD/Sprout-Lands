@@ -8,7 +8,7 @@ export const VIEW_H = 640;
 export const PLAYER_SPEED = 150;
 
 /** Full run length when IslandScene starts (ms). */
-export const RUN_DURATION_MS = 10 * 60 * 1000;
+export const RUN_DURATION_MS = 6 * 60 * 1000;
 /** HUD pulse / warn styling below this (ms). */
 export const TIMER_WARN_MS = 2 * 60 * 1000;
 /** Imposter begins hunting at or below this remaining time (ms). */
@@ -28,6 +28,16 @@ export const STAR_3_REMAINING_MS = 4 * 60 * 1000;
 export const FLOOD_RISE_BASE_PX = 10;
 /** Extra rise when player moves left (don't look back). */
 export const FLOOD_RISE_BACK_VX_MULT = 0.04;
+/** Imposter random-kill grace period from scene start (ms). */
+export const IMPOSTER_KILL_GRACE_MS = 20 * 1000;
+/** Minimum delay between kill chance checks (ms). */
+export const IMPOSTER_KILL_CHECK_MIN_MS = 1600;
+/** Maximum delay between kill chance checks (ms). */
+export const IMPOSTER_KILL_CHECK_MAX_MS = 2200;
+/** Kill can only trigger when imposter is this close to player (px). */
+export const IMPOSTER_KILL_RANGE_PX = 84;
+/** Medium aggression: chance to kill when in range at each check. */
+export const IMPOSTER_KILL_CHANCE = 0.38;
 
 export const COLORS = {
   grassLight: 0xc6dca8,
