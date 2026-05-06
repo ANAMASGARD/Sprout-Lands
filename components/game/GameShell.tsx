@@ -1,21 +1,43 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { RUN_DURATION_MS } from "@/lib/game/constants";
+import type { GameLostCause } from "@/lib/game/eventBus";
 import { gameBus } from "@/lib/game/eventBus";
-import HudOverlay from "./HudOverlay";
 import DialogOverlay from "./DialogOverlay";
+import GameOverOverlay from "./GameOverOverlay";
+import HudOverlay from "./HudOverlay";
+import ImposterTrialOverlay from "./ImposterTrialOverlay";
 import MysterySolved from "./MysterySolved";
 import MobileControls from "./MobileControls";
 import MusicControls from "./MusicControls";
+
+/*
+ * Reset contract (runKey / RunTimer / React overlays)
+ * | State              | Lives in           | runKey remount? | Explicit reset?                    |
+ * |--------------------|--------------------|-----------------|------------------------------------|
+ * | Charms, shrine…    | IslandScene        | Yes             | No                                 |
+ * | Imposter RNG       | IslandScene        | Yes             | No                                 |
+ * | accusationUsed     | IslandScene        | Yes             | No                                 |
+ * | remainingMs        | RunTimer (React)   | No              | Set on run:started                 |
+ * | HP display         | HudOverlay         | No              | hp:update on island create         |
+ * | GameOver visible   | GameShell          | No              | Clear before remount / on run:started |
+ * | Trial open         | ImposterTrialOverlay | No           | Close on run:started               |
+ */
 
 const PhaserGame = dynamic(() => import("./PhaserGame"), { ssr: false });
 
 export default function GameShell() {
   const [started, setStarted] = useState(false);
+  const [runKey, setRunKey] = useState(0);
   const [activeScene, setActiveScene] = useState<"island" | "caverns" | "library">(
     "island",
   );
+  const [gameOver, setGameOver] = useState<{
+    cause: GameLostCause;
+    reason: string;
+  } | null>(null);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -38,6 +60,107 @@ export default function GameShell() {
     return () => off();
   }, []);
 
+  /** Global pressure timer (survives IslandScene sleep). */
+  useEffect(() => {
+    let remainingMs = RUN_DURATION_MS;
+    let tickInterval: ReturnType<typeof setInterval> | undefined;
+    let running = false;
+
+    const emitTick = () => {
+      gameBus.emit("timer:tick", {
+        remainingMs,
+        remainingSeconds: Math.max(0, Math.ceil(remainingMs / 1000)),
+      });
+    };
+
+    const stopTicks = () => {
+      running = false;
+      if (tickInterval !== undefined) {
+        clearInterval(tickInterval);
+        tickInterval = undefined;
+      }
+    };
+
+    const fireTimeoutLoss = () => {
+      stopTicks();
+      gameBus.emit("game:lost", {
+        cause: "timeout",
+        reason:
+          "The waves swallowed the island… It’s gone. You’ll have to try again.",
+      });
+      gameBus.emit("run:stopped", { outcome: "lose" });
+      gameBus.emit("input:freeze", { frozen: true });
+    };
+
+    const unsubStart = gameBus.on("run:started", ({ durationMs }) => {
+      stopTicks();
+      remainingMs = durationMs;
+      running = true;
+      emitTick();
+      tickInterval = setInterval(() => {
+        if (!running) return;
+        remainingMs = Math.max(0, remainingMs - 250);
+        emitTick();
+        if (remainingMs <= 0) {
+          fireTimeoutLoss();
+        }
+      }, 250);
+    });
+
+    const unsubPenalty = gameBus.on("pressure:penalty", ({ seconds }) => {
+      if (!running && remainingMs <= 0) return;
+      remainingMs = Math.max(0, remainingMs - seconds * 1000);
+      emitTick();
+      if (running && remainingMs <= 0) {
+        fireTimeoutLoss();
+      }
+    });
+
+    const unsubBonus = gameBus.on("pressure:bonus", ({ seconds }) => {
+      remainingMs += seconds * 1000;
+      emitTick();
+    });
+
+    const unsubWin = gameBus.on("mystery:solved", () => {
+      stopTicks();
+      gameBus.emit("run:stopped", { outcome: "win" });
+    });
+
+    const unsubLost = gameBus.on("game:lost", () => {
+      stopTicks();
+    });
+
+    const unsubStopped = gameBus.on("run:stopped", ({ outcome }) => {
+      if (outcome === "lose" || outcome === "restart") {
+        stopTicks();
+      }
+    });
+
+    return () => {
+      stopTicks();
+      unsubStart();
+      unsubPenalty();
+      unsubBonus();
+      unsubWin();
+      unsubLost();
+      unsubStopped();
+    };
+  }, []);
+
+  useEffect(() => {
+    const off = gameBus.on("game:lost", ({ cause, reason }) => {
+      setGameOver({ cause, reason });
+    });
+    return () => off();
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    setGameOver(null);
+    gameBus.emit("input:freeze", { frozen: false });
+    gameBus.emit("run:stopped", { outcome: "restart" });
+    setRunKey((k) => k + 1);
+  }, []);
+
   return (
     <div
       className={`relative h-dvh w-full overflow-hidden ${
@@ -52,12 +175,18 @@ export default function GameShell() {
         <TitleScreen onStart={() => setStarted(true)} />
       ) : (
         <>
-          <PhaserGame />
+          <PhaserGame key={runKey} />
           <HudOverlay />
           <MusicControls enabled={started} />
           <DialogOverlay />
+          <ImposterTrialOverlay />
           <MobileControls />
           <MysterySolved />
+          <GameOverOverlay
+            cause={gameOver?.cause ?? null}
+            reason={gameOver?.reason ?? ""}
+            onRetry={handleRetry}
+          />
         </>
       )}
     </div>
@@ -75,9 +204,7 @@ function TitleScreen({ onStart }: { onStart: () => void }) {
         <h1 className="mb-2 text-3xl font-bold uppercase tracking-wider">
           Number Mystery Quest
         </h1>
-        <p className="mb-1 text-sm">
-          Find Gaurav Chaudhary&apos;s Number
-        </p>
+        <p className="mb-1 text-sm">OinkJam — Under Pressure + Imposter</p>
 
         <div className="my-6 flex items-center justify-center gap-2 text-3xl">
           <span title="Sun Charm">☀</span>
@@ -87,9 +214,9 @@ function TitleScreen({ onStart }: { onStart: () => void }) {
         </div>
 
         <p className="mb-6 px-2 text-sm leading-relaxed">
-          The goal is clear: find Gaurav Chaudhary&apos;s phone number. Help
-          Teemo solve each mystery puzzle, collect all four charms, and unlock
-          the chest to reveal the final number.
+          Beat the clock, collect four charms, and open the chest. One of the
+          island cats is lying — use the Whisper Stone to accuse them once per
+          run. The cavern floods; the imposter may hunt you when time runs low.
         </p>
 
         <div className="mb-6 grid grid-cols-2 gap-3 text-left text-[11px]">

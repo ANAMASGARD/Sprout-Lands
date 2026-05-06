@@ -1,5 +1,11 @@
 import * as Phaser from "phaser";
-import { COLORS, VIEW_H, VIEW_W } from "../constants";
+import {
+  COLORS,
+  FLOOD_RISE_BACK_VX_MULT,
+  FLOOD_RISE_BASE_PX,
+  VIEW_H,
+  VIEW_W,
+} from "../constants";
 import { ASSET_KEYS, EMOJI_FRAMES } from "../assets";
 import { gameBus } from "../eventBus";
 
@@ -17,6 +23,11 @@ export class CavernsScene extends Phaser.Scene {
   private virtualInput = { left: false, right: false, up: false, down: false };
   private virtualJumpRequested = false;
   private busUnsubs: Array<() => void> = [];
+  private inputFrozen = false;
+  private floodSurfaceY = CAVERN_H + 100;
+  private floodGraphics!: Phaser.GameObjects.Graphics;
+  private drowned = false;
+  private sfxJump?: Phaser.Sound.BaseSound;
 
   constructor() {
     super("CavernsScene");
@@ -71,8 +82,6 @@ export class CavernsScene extends Phaser.Scene {
     this.physics.add.existing(ground, true);
     this.platforms.add(ground);
 
-    // Keep the same zig-zag route, but with closer vertical spacing
-    // and slightly wider platforms to make climbing easier.
     const platSpecs: Array<[number, number, number]> = [
       [120, CAVERN_H - 98, 160],
       [300, CAVERN_H - 146, 140],
@@ -96,6 +105,7 @@ export class CavernsScene extends Phaser.Scene {
       ASSET_KEYS.emojiSheet,
       EMOJI_FRAMES.catYellow,
     );
+    this.player.setDepth(22);
     this.player.setSize(18, 14).setOffset(7, 16);
     this.player.setCollideWorldBounds(true);
     this.player.setBounce(0.05);
@@ -123,6 +133,10 @@ export class CavernsScene extends Phaser.Scene {
     });
     this.charm = charmContainer;
 
+    this.floodGraphics = this.add.graphics();
+    this.floodGraphics.setDepth(20);
+    this.sfxJump = this.sound.add(ASSET_KEYS.sfxJump, { volume: 0.35 });
+
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys({
       W: Phaser.Input.Keyboard.KeyCodes.W,
@@ -138,6 +152,13 @@ export class CavernsScene extends Phaser.Scene {
         this.virtualInput = state;
         if (state.up) this.virtualJumpRequested = true;
       }),
+      gameBus.on("input:freeze", ({ frozen }) => {
+        this.inputFrozen = frozen;
+        if (frozen) {
+          this.player.setVelocity(0, 0);
+          this.virtualInput = { left: false, right: false, up: false, down: false };
+        }
+      }),
     );
 
     this.events.on(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -148,12 +169,12 @@ export class CavernsScene extends Phaser.Scene {
     gameBus.emit("dialog:show", {
       speaker: "Teemo",
       lines: [
-        "The cavern echoes... I feel gravity tugging me down.",
-        "I'll jump platform to platform to reach the WAVE CHARM!",
+        "The cavern echoes... cold water claws upward.",
+        "Don't look back — moving backward riles the flood. Reach the WAVE CHARM!",
       ],
     });
     gameBus.emit("objective:update", {
-      text: "Climb the cavern and grab the wave charm",
+      text: "Climb the cavern and grab the wave charm — before the water wins.",
     });
   }
 
@@ -169,18 +190,68 @@ export class CavernsScene extends Phaser.Scene {
     });
   }
 
+  private redrawFlood() {
+    const g = this.floodGraphics;
+    g.clear();
+    const h = CAVERN_H - this.floodSurfaceY + 24;
+    if (h <= 0) return;
+    g.fillStyle(COLORS.water, 0.82);
+    g.fillRect(0, this.floodSurfaceY, CAVERN_W, h);
+    g.lineStyle(3, COLORS.waterDeep, 1);
+    g.beginPath();
+    const t = this.time.now / 420;
+    for (let x = 0; x <= CAVERN_W; x += 12) {
+      const wob = Math.sin(x * 0.035 + t) * 5;
+      const y = this.floodSurfaceY + wob;
+      if (x === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.strokePath();
+  }
+
+  private triggerDrown() {
+    if (this.drowned || this.exited) return;
+    this.drowned = true;
+    gameBus.emit("game:lost", {
+      cause: "flood",
+      reason: "The cavern filled with water… Teemo never made it out.",
+    });
+    gameBus.emit("input:freeze", { frozen: true });
+  }
+
   update() {
     if (!this.player || this.exited) return;
 
+    const dt = this.game.loop.delta / 1000;
+
+    if (!this.drowned && !this.collected) {
+      const body = this.player.body as Phaser.Physics.Arcade.Body;
+      const vx = body.velocity.x;
+      const back = Math.max(0, -vx);
+      const rise = (FLOOD_RISE_BASE_PX + back * FLOOD_RISE_BACK_VX_MULT) * dt;
+      this.floodSurfaceY -= rise;
+      this.redrawFlood();
+
+      if (this.player.y + 8 > this.floodSurfaceY) {
+        this.triggerDrown();
+      }
+    }
+
+    if (this.drowned) {
+      return;
+    }
+
+    const can = !this.inputFrozen;
     const left =
-      this.cursors.left?.isDown || this.wasd.A.isDown || this.virtualInput.left;
+      can && (this.cursors.left?.isDown || this.wasd.A.isDown || this.virtualInput.left);
     const right =
-      this.cursors.right?.isDown || this.wasd.D.isDown || this.virtualInput.right;
+      can && (this.cursors.right?.isDown || this.wasd.D.isDown || this.virtualInput.right);
     const jumpPressed =
-      Phaser.Input.Keyboard.JustDown(this.cursors.up!) ||
-      Phaser.Input.Keyboard.JustDown(this.wasd.W) ||
-      Phaser.Input.Keyboard.JustDown(this.wasd.SPACE) ||
-      this.virtualJumpRequested;
+      can &&
+      (Phaser.Input.Keyboard.JustDown(this.cursors.up!) ||
+        Phaser.Input.Keyboard.JustDown(this.wasd.W) ||
+        Phaser.Input.Keyboard.JustDown(this.wasd.SPACE) ||
+        this.virtualJumpRequested);
     this.virtualJumpRequested = false;
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
@@ -198,6 +269,7 @@ export class CavernsScene extends Phaser.Scene {
 
     if (jumpPressed && onGround) {
       this.player.setVelocityY(-340);
+      this.sfxJump?.play();
     }
 
     if (this.charm && !this.collected) {

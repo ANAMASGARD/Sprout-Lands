@@ -10,11 +10,28 @@ import {
   PUZZLE_IDS,
   PUZZLE_ORDER,
   REWARD_PHONE_NUMBER,
+  RUN_DURATION_MS,
+  HP_MAX,
+  HUNT_AT_REMAINING_MS,
+  PARANOIA_AT_REMAINING_MS,
+  GARDEN_COMMIT_MS,
+  PRESSURE_PENALTY_GARDEN_FAIL_SEC,
+  STAR_2_REMAINING_MS,
+  STAR_3_REMAINING_MS,
   type PuzzleId,
 } from "../constants";
 import { ASSET_KEYS, EMOJI_FRAMES } from "../assets";
 import { gameBus } from "../eventBus";
 import { PUZZLES } from "../puzzles";
+import {
+  GARDEN_LIES,
+  GARDEN_TRUTH,
+  GARDEN_TRUTH_PARANOID,
+  NPC_NAMES,
+  SHRINE_LIES,
+  SHRINE_TRUTH,
+  SHRINE_TRUTH_PARANOID,
+} from "../npcDialog";
 
 type Interactable = {
   zone: Phaser.GameObjects.Zone;
@@ -33,15 +50,17 @@ type NpcWanderer = {
   name: string;
   sprite: Phaser.Physics.Arcade.Sprite;
   chatZone: Phaser.GameObjects.Zone;
-  chatLines: string[];
   target: Phaser.Math.Vector2;
   speed: number;
   nextRetargetAt: number;
   waitingUntil: number;
   isWaiting: boolean;
+  /** Hunt Mode (imposter only): unstuck detour */
+  huntLowVxSince?: number;
+  huntDetourUntil?: number;
+  huntDetourTarget?: Phaser.Math.Vector2;
 };
 
-const CROP_ORDER = [0, 1, 2, 3];
 const SHRINE_TARGET = ["sun", "leaf", "wave", "moon"] as const;
 const SHRINE_SYMBOLS = ["sun", "leaf", "wave", "moon"] as const;
 type ShrineSymbol = (typeof SHRINE_SYMBOLS)[number];
@@ -64,6 +83,7 @@ export class IslandScene extends Phaser.Scene {
   private solids!: Phaser.Physics.Arcade.StaticGroup;
   private crates!: Phaser.Physics.Arcade.Group;
   private cropTiles: CropTile[] = [];
+  private cropOrder: number[] = [0, 1, 2, 3];
   private cropProgress = 0;
   private cropResetText!: Phaser.GameObjects.Text;
   private shrineState: ShrineSymbol[] = ["sun", "sun", "sun", "sun"];
@@ -75,6 +95,20 @@ export class IslandScene extends Phaser.Scene {
   private virtualInput = { left: false, right: false, up: false, down: false };
   private busUnsubs: Array<() => void> = [];
   private npcs: NpcWanderer[] = [];
+  private inputFrozen = false;
+  private lastRemainingMs = RUN_DURATION_MS;
+  private imposterName = "";
+  private accusationUsed = false;
+  private accusationCorrect = false;
+  private playerHp = HP_MAX;
+  private huntHumStarted = false;
+  private gardenCommitDeadline: number | null = null;
+  private gardenBarFill: Phaser.GameObjects.Rectangle | null = null;
+  private gardenBarMaxW = TILE * 4;
+  private gardenBarX = 0;
+  private gardenBarY = 0;
+  private chestInteractable: Interactable | null = null;
+  private whisperInteractable: Interactable | null = null;
 
   constructor() {
     super("IslandScene");
@@ -115,6 +149,7 @@ export class IslandScene extends Phaser.Scene {
     this.placeCavernEntrance();
     this.placeShrine();
     this.placeChest();
+    this.placeWhisperStone();
     this.placeCrates();
     this.placeNpcWanderers();
 
@@ -139,17 +174,18 @@ export class IslandScene extends Phaser.Scene {
 
     this.makeHint();
 
-    gameBus.emit("hp:update", { current: 3, max: 3 });
+    gameBus.emit("hp:update", { current: HP_MAX, max: HP_MAX });
+    gameBus.emit("run:started", { durationMs: RUN_DURATION_MS });
     gameBus.emit("objective:update", {
-      text: "Start the quest: find Gaurav Chaudhary's number.",
+      text: "Race the clock — collect every charm and open the chest.",
     });
     gameBus.emit("dialog:show", {
       speaker: "Teemo",
       lines: [
-        "Mrow... a secret quest has begun!",
-        "I need to find Gaurav Chaudhary's phone number.",
-        "To reveal it, I must solve FOUR mystery puzzles.",
-        "Use Arrows or WASD to walk. Press E to interact.",
+        "Mrow… the tide is rising!",
+        "I need Gaurav Chaudhary's phone number before the island sinks.",
+        "Four charms seal the chest. One of the cats is lying — ask around.",
+        "Use Arrows or WASD to walk. Press E to interact. Listen for the Whisper Stone.",
       ],
     });
 
@@ -158,7 +194,7 @@ export class IslandScene extends Phaser.Scene {
         this.virtualInput = state;
       }),
       gameBus.on("input:interact", () => {
-        this.tryInteract();
+        if (!this.inputFrozen) this.tryInteract();
       }),
       gameBus.on("scene:return-from-caverns", ({ collected }) => {
         if (collected) {
@@ -170,11 +206,26 @@ export class IslandScene extends Phaser.Scene {
           this.completePuzzle(PUZZLE_IDS.cottage);
         }
       }),
+      gameBus.on("input:freeze", ({ frozen }) => {
+        this.inputFrozen = frozen;
+        if (frozen && this.player?.active) {
+          this.player.setVelocity(0, 0);
+          this.virtualInput = { left: false, right: false, up: false, down: false };
+        }
+      }),
+      gameBus.on("timer:tick", ({ remainingMs }) => {
+        this.lastRemainingMs = remainingMs;
+      }),
+      gameBus.on("imposter:accuse-pick", ({ accusedName }) => {
+        this.handleAccusationPick(accusedName);
+      }),
     );
 
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
       this.cameras.main.fadeIn(300, 0, 0, 0);
     });
+
+    this.refreshChestPrompt();
 
     this.events.on(Phaser.Scenes.Events.SHUTDOWN, () => {
       for (const off of this.busUnsubs) off();
@@ -455,6 +506,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private enterLibrary() {
+    if (this.inputFrozen) return;
     gameBus.emit("scene:enter", { scene: "library" });
     this.cameras.main.fadeOut(300, 0, 0, 0);
     this.time.delayedCall(320, () => {
@@ -466,6 +518,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private placeGarden() {
+    this.cropOrder = Phaser.Utils.Array.Shuffle([0, 1, 2, 3]);
     const startX = 22 * TILE;
     const y = 6 * TILE;
 
@@ -479,7 +532,7 @@ export class IslandScene extends Phaser.Scene {
     plotBg.setStrokeStyle(2, COLORS.cropPlotDark);
     plotBg.setDepth(3);
 
-    const labels = ["TINY", "SHORT", "TALL", "BLOOM"];
+    const labels = ["·", "·", "·", "·"];
     const heights = [4, 8, 14, 18];
 
     for (let i = 0; i < 4; i++) {
@@ -530,7 +583,7 @@ export class IslandScene extends Phaser.Scene {
     }
 
     this.cropResetText = this.add
-      .text(startX + TILE * 2, y - 28, "Step in order: TINY → SHORT → TALL → BLOOM", {
+      .text(startX + TILE * 2, y - 28, "Garden sequence is random each run.", {
         fontFamily: "Sprout Lands, monospace",
         fontSize: "10px",
         color: "#4a3528",
@@ -539,32 +592,90 @@ export class IslandScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 1)
       .setDepth(20);
+
+    this.gardenBarX = startX + TILE * 2 - TILE * 2;
+    this.gardenBarY = y - 42;
+    this.add
+      .rectangle(
+        this.gardenBarX + this.gardenBarMaxW / 2,
+        this.gardenBarY,
+        this.gardenBarMaxW + 4,
+        8,
+        COLORS.bridgeDark,
+        0.7,
+      )
+      .setDepth(19);
+    this.gardenBarFill = this.add.rectangle(
+      this.gardenBarX,
+      this.gardenBarY,
+      this.gardenBarMaxW,
+      4,
+      COLORS.starGold,
+      0.95,
+    );
+    this.gardenBarFill.setOrigin(0, 0.5);
+    this.gardenBarFill.setStrokeStyle(1, COLORS.starShadow);
+    this.gardenBarFill.setVisible(false);
+    this.gardenBarFill.setDepth(20);
   }
 
   private onCropTileEntered(tile: CropTile) {
     if (this.collectedCharms.has(PUZZLE_IDS.garden)) return;
     if (tile.activated) return;
 
-    if (tile.index === CROP_ORDER[this.cropProgress]) {
+    if (tile.index === this.cropOrder[this.cropProgress]) {
+      const starting = this.cropProgress === 0;
+      this.playSfx(ASSET_KEYS.sfxCropPop, 0.4);
       tile.activated = true;
       tile.rect.setFillStyle(COLORS.starGold);
       this.cropProgress++;
       this.cameras.main.flash(120, 250, 230, 200);
-      if (this.cropProgress === CROP_ORDER.length) {
+      if (starting) {
+        this.gardenCommitDeadline = this.time.now + GARDEN_COMMIT_MS;
+        if (this.gardenBarFill) {
+          this.gardenBarFill.setVisible(true);
+          this.gardenBarFill.width = this.gardenBarMaxW;
+        }
+      }
+      if (this.cropProgress === this.cropOrder.length) {
+        this.gardenCommitDeadline = null;
+        this.gardenBarFill?.setVisible(false);
         this.cropResetText.setText("The crops harmonize!");
         this.time.delayedCall(400, () => {
           this.completePuzzle(PUZZLE_IDS.garden);
         });
       }
     } else {
+      this.playSfx(ASSET_KEYS.sfxCropPop, 0.4);
       this.cameras.main.shake(120, 0.005);
+      this.clearGardenCommit();
       this.cropProgress = 0;
       for (const t of this.cropTiles) {
         t.activated = false;
         t.rect.setFillStyle(COLORS.cropGrowing);
       }
-      this.cropResetText.setText("Order broken. Restart from TINY.");
+      this.cropResetText.setText("Order broken — read the heights again.");
     }
+  }
+
+  private clearGardenCommit() {
+    this.gardenCommitDeadline = null;
+    this.gardenBarFill?.setVisible(false);
+  }
+
+  private failGardenCommitTimedOut() {
+    this.cameras.main.shake(160, 0.008);
+    this.cropProgress = 0;
+    for (const t of this.cropTiles) {
+      t.activated = false;
+      t.rect.setFillStyle(COLORS.cropGrowing);
+    }
+    this.cropResetText.setText("Too slow! The ground takes the blessing back.");
+    this.clearGardenCommit();
+    gameBus.emit("pressure:penalty", {
+      seconds: PRESSURE_PENALTY_GARDEN_FAIL_SEC,
+      reason: "Garden sequence timed out",
+    });
   }
 
   private placeCavernEntrance() {
@@ -602,6 +713,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private enterCaverns() {
+    if (this.inputFrozen) return;
     if (this.collectedCharms.has(PUZZLE_IDS.caverns)) {
       gameBus.emit("dialog:show", {
         speaker: "Teemo",
@@ -675,7 +787,7 @@ export class IslandScene extends Phaser.Scene {
     }
 
     const hint = this.add
-      .text(baseX + TILE * 2, baseY - 36, "Match the order Teemo learned", {
+      .text(baseX + TILE * 2, baseY - 36, "Symbols remember what the cats teach you", {
         fontFamily: "Sprout Lands, monospace",
         fontSize: "10px",
         color: "#4a3528",
@@ -735,14 +847,23 @@ export class IslandScene extends Phaser.Scene {
 
     const zone = this.add.zone(x, y + TILE, TILE * 2, TILE);
     this.physics.add.existing(zone, true);
-    this.interactables.push({
+    const interact: Interactable = {
       zone,
-      prompt: "Open chest",
+      prompt: "Inspect pedestal",
       onInteract: () => this.tryOpenChest(),
-    });
+    };
+    this.interactables.push(interact);
+    this.chestInteractable = interact;
+  }
+
+  private refreshChestPrompt() {
+    if (!this.chestInteractable) return;
+    this.chestInteractable.prompt =
+      this.collectedCharms.size >= PUZZLE_ORDER.length ? "Open chest" : "Inspect pedestal";
   }
 
   private tryOpenChest() {
+    if (this.inputFrozen) return;
     if (this.chestOpened) {
       gameBus.emit("dialog:show", {
         speaker: "Teemo",
@@ -751,15 +872,19 @@ export class IslandScene extends Phaser.Scene {
       return;
     }
     if (this.collectedCharms.size < PUZZLE_ORDER.length) {
-      const remaining = PUZZLE_ORDER.filter(
-        (id) => !this.collectedCharms.has(id),
-      ).map((id) => PUZZLES[id].charmLabel);
       gameBus.emit("dialog:show", {
         speaker: "Teemo",
         lines: [
-          "The chest is sealed by four charms.",
-          `Still missing: ${remaining.join(", ")}.`,
+          "This pedestal is sealed tight.",
+          "Four charms must sing together before it opens.",
         ],
+      });
+      return;
+    }
+    if (this.lastRemainingMs <= 0) {
+      gameBus.emit("dialog:show", {
+        speaker: "Teemo",
+        lines: ["The ocean took the island first… it's too late for this."],
       });
       return;
     }
@@ -773,17 +898,26 @@ export class IslandScene extends Phaser.Scene {
     });
     this.cameras.main.flash(280, 255, 240, 180);
 
+    let stars = 1;
+    if (this.lastRemainingMs >= STAR_2_REMAINING_MS) stars = 2;
+    if (this.accusationCorrect && this.lastRemainingMs >= STAR_3_REMAINING_MS) stars = 3;
+
     gameBus.emit("dialog:show", {
       speaker: "Teemo",
       lines: [
         "The final mystery is solved!",
-        "The chest opens with a bright glow...",
+        "The chest opens with a bright glow…",
         "The scroll shows Gaurav Chaudhary's phone number!",
       ],
     });
 
     this.time.delayedCall(900, () => {
-      gameBus.emit("mystery:solved", { reward: REWARD_PHONE_NUMBER });
+      gameBus.emit("mystery:solved", {
+        reward: REWARD_PHONE_NUMBER,
+        stars,
+        remainingMsSnapshot: this.lastRemainingMs,
+        accusedCorrectly: this.accusationCorrect,
+      });
     });
   }
 
@@ -822,47 +956,13 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private placeNpcWanderers() {
+    this.imposterName = Phaser.Utils.Array.GetRandom([...NPC_NAMES]);
     const npcProfiles = [
-      {
-        name: "Mimi",
-        frame: EMOJI_FRAMES.catOrange,
-        lines: [
-          "Gaurav is such a very good boy!",
-          "He built this lovely land with heart and imagination.",
-        ],
-      },
-      {
-        name: "Piko",
-        frame: EMOJI_FRAMES.catRed,
-        lines: [
-          "Gaurav is super smart. You can feel it in every puzzle here!",
-          "This whole island is full of creative details because of him.",
-        ],
-      },
-      {
-        name: "Luna",
-        frame: EMOJI_FRAMES.catPurple,
-        lines: [
-          "Everyone says Gaurav is kind and attractive.",
-          "He made Sprout Lands magical for all of us.",
-        ],
-      },
-      {
-        name: "Nori",
-        frame: EMOJI_FRAMES.catBlue,
-        lines: [
-          "Gaurav created this land and made it feel alive.",
-          "He is thoughtful, talented, and full of bright ideas.",
-        ],
-      },
-      {
-        name: "Tomo",
-        frame: EMOJI_FRAMES.catGreen,
-        lines: [
-          "Gaurav is awesome - smart, creative, and caring.",
-          "Thanks to him, we all get to wander this beautiful island.",
-        ],
-      },
+      { name: "Mimi" as const, frame: EMOJI_FRAMES.catOrange },
+      { name: "Piko" as const, frame: EMOJI_FRAMES.catRed },
+      { name: "Luna" as const, frame: EMOJI_FRAMES.catPurple },
+      { name: "Nori" as const, frame: EMOJI_FRAMES.catBlue },
+      { name: "Tomo" as const, frame: EMOJI_FRAMES.catGreen },
     ];
     for (const profile of npcProfiles) {
       const spawn = this.randomNpcPoint();
@@ -877,7 +977,6 @@ export class IslandScene extends Phaser.Scene {
       sprite.setCollideWorldBounds(true);
       sprite.setBounce(0.02);
       sprite.setDrag(220, 220);
-
       const chatZone = this.add.zone(spawn.x, spawn.y, 36, 30);
       this.physics.add.existing(chatZone, true);
 
@@ -889,7 +988,6 @@ export class IslandScene extends Phaser.Scene {
         name: profile.name,
         sprite,
         chatZone,
-        chatLines: profile.lines,
         target: this.randomNpcPoint(),
         speed: Phaser.Math.Between(34, 52),
         nextRetargetAt: this.time.now + Phaser.Math.Between(2200, 4600),
@@ -906,6 +1004,170 @@ export class IslandScene extends Phaser.Scene {
     }
   }
 
+  private placeWhisperStone() {
+    const x = 9 * TILE + 12;
+    const y = 15 * TILE;
+    const stone = this.add.circle(x, y, 14, COLORS.shrineDark, 0.92);
+    stone.setStrokeStyle(3, COLORS.gem);
+    stone.setDepth(11);
+    this.add
+      .text(x, y - 22, "◇", {
+        fontFamily: "Sprout Lands, monospace",
+        fontSize: "14px",
+        color: "#fbeec1",
+      })
+      .setOrigin(0.5)
+      .setDepth(12);
+
+    const zone = this.add.zone(x, y, TILE * 1.5, TILE * 1.2);
+    this.physics.add.existing(zone, true);
+    const it: Interactable = {
+      zone,
+      prompt: "Touch the Whisper Stone",
+      onInteract: () => {
+        if (this.inputFrozen) return;
+        if (this.accusationUsed) {
+          gameBus.emit("dialog:show", {
+            speaker: "Teemo",
+            lines: ["The stone has gone silent.", "I've already cast my one accusation."],
+          });
+          return;
+        }
+        gameBus.emit("imposter:accuse-open", { names: [...NPC_NAMES] });
+      },
+    };
+    this.interactables.push(it);
+    this.whisperInteractable = it;
+  }
+
+  private handleAccusationPick(accusedName: string) {
+    if (!this.scene.isActive() || this.accusationUsed) return;
+    this.accusationUsed = true;
+    if (this.whisperInteractable) {
+      this.whisperInteractable.prompt = "The stone has gone silent.";
+    }
+    const correct = accusedName === this.imposterName;
+    this.accusationCorrect = correct;
+    if (correct) {
+      this.playerHp = Math.min(HP_MAX, this.playerHp + 1);
+      gameBus.emit("hp:update", { current: this.playerHp, max: HP_MAX });
+      gameBus.emit("pressure:bonus", { seconds: 45, reason: "Exposed the liar" });
+      gameBus.emit("dialog:show", {
+        speaker: "Teemo",
+        lines: [
+          `${accusedName} was the imposter!`,
+          "The air feels lighter… and I earned a little more time.",
+        ],
+      });
+      this.applyShrineShortcutIfEligible();
+    } else {
+      this.playerHp -= 1;
+      gameBus.emit("hp:update", { current: this.playerHp, max: HP_MAX });
+      gameBus.emit("dialog:show", {
+        speaker: "Teemo",
+        lines: [
+          `${accusedName} stares back, offended.`,
+          "That wasn't the liar… Teemo's heart sinks.",
+        ],
+      });
+      if (this.playerHp <= 0) {
+        gameBus.emit("game:lost", {
+          cause: "wrong-accusation-hp",
+          reason: "Wrong cat — Teemo ran out of heart to keep going.",
+        });
+        gameBus.emit("input:freeze", { frozen: true });
+      }
+    }
+  }
+
+  private applyShrineShortcutIfEligible() {
+    if (this.collectedCharms.has(PUZZLE_IDS.shrine)) return;
+    for (let i = 0; i < 4; i++) {
+      this.shrineState[i] = SHRINE_TARGET[i];
+      this.shrinePillars[i].setText(SYMBOL_LABEL[this.shrineState[i]]);
+    }
+    this.time.delayedCall(500, () => {
+      if (!this.collectedCharms.has(PUZZLE_IDS.shrine)) {
+        this.completePuzzle(PUZZLE_IDS.shrine);
+      }
+    });
+  }
+
+  private imposterContactCooldown = 0;
+
+  private onImposterContactDamage() {
+    if (this.inputFrozen || this.time.now < this.imposterContactCooldown) return;
+    this.imposterContactCooldown = this.time.now + 1400;
+    this.playerHp -= 1;
+    gameBus.emit("hp:update", { current: this.playerHp, max: HP_MAX });
+    this.cameras.main.shake(200, 0.012);
+    if (this.playerHp <= 0) {
+      gameBus.emit("game:lost", {
+        cause: "imposter-contact",
+        reason: "The imposter caught Teemo — it's over.",
+      });
+      gameBus.emit("input:freeze", { frozen: true });
+    }
+  }
+
+  private updateImposterHunt(npc: NpcWanderer) {
+    const s = npc.sprite;
+    npc.chatZone.setPosition(s.x, s.y + 2);
+    if (!this.huntHumStarted) {
+      this.huntHumStarted = true;
+      gameBus.emit("imposter:hunt-start", {});
+    }
+
+    const px = this.player.x;
+    const py = this.player.y;
+
+    if (npc.huntDetourUntil !== undefined && this.time.now < npc.huntDetourUntil) {
+      const tx = npc.huntDetourTarget!.x;
+      const ty = npc.huntDetourTarget!.y;
+      const dist = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
+      if (dist < 10) {
+        npc.huntDetourUntil = undefined;
+      } else {
+        const ang = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
+        const sp = npc.speed * 1.1;
+        s.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp);
+      }
+    } else {
+      npc.huntDetourUntil = undefined;
+      const angle = Phaser.Math.Angle.Between(s.x, s.y, px, py);
+      const huntSpeed = npc.speed * 1.35;
+      s.setVelocity(Math.cos(angle) * huntSpeed, Math.sin(angle) * huntSpeed);
+    }
+
+    const body = s.body as Phaser.Physics.Arcade.Body;
+    const v2 = body.velocity.x * body.velocity.x + body.velocity.y * body.velocity.y;
+    const distP = Phaser.Math.Distance.Between(s.x, s.y, px, py);
+    if (distP > 22 && v2 < 25) {
+      if (npc.huntLowVxSince === undefined) npc.huntLowVxSince = this.time.now;
+      else if (this.time.now - npc.huntLowVxSince > 500) {
+        npc.huntDetourUntil = this.time.now + 1000;
+        npc.huntDetourTarget = new Phaser.Math.Vector2(
+          s.x + Phaser.Math.Between(-60, 60),
+          s.y + Phaser.Math.Between(-60, 60),
+        );
+        npc.huntLowVxSince = undefined;
+      }
+    } else {
+      npc.huntLowVxSince = undefined;
+    }
+
+    const vx = body.velocity.x;
+    if (vx < -1) s.setFlipX(false);
+    else if (vx > 1) s.setFlipX(true);
+
+    if (distP < 20) {
+      this.onImposterContactDamage();
+    }
+
+    const bob = Math.sin(this.time.now / 55) * 0.09;
+    s.setScale(1 + bob, 1 - bob);
+  }
+
   private randomNpcPoint() {
     return new Phaser.Math.Vector2(
       Phaser.Math.Between(3 * TILE, MAP_W - 3 * TILE),
@@ -914,10 +1176,28 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private chatWithNpc(npc: NpcWanderer) {
-    const pick = Phaser.Utils.Array.GetRandom(npc.chatLines);
+    if (this.inputFrozen) return;
+    const paranoid =
+      this.lastRemainingMs < PARANOIA_AT_REMAINING_MS &&
+      npc.name !== this.imposterName;
+    const gardenTopic = Phaser.Math.RND.frac() < 0.5;
+    let line: string;
+    if (npc.name === this.imposterName) {
+      line = gardenTopic
+        ? Phaser.Utils.Array.GetRandom([...GARDEN_LIES])
+        : Phaser.Utils.Array.GetRandom([...SHRINE_LIES]);
+    } else if (paranoid) {
+      line = gardenTopic
+        ? Phaser.Utils.Array.GetRandom([...GARDEN_TRUTH_PARANOID])
+        : Phaser.Utils.Array.GetRandom([...SHRINE_TRUTH_PARANOID]);
+    } else {
+      line = gardenTopic
+        ? Phaser.Utils.Array.GetRandom([...GARDEN_TRUTH])
+        : Phaser.Utils.Array.GetRandom([...SHRINE_TRUTH]);
+    }
     gameBus.emit("dialog:show", {
       speaker: npc.name,
-      lines: [pick, "Teemo nods happily."],
+      lines: [line, "Teemo listens closely."],
     });
   }
 
@@ -925,6 +1205,15 @@ export class IslandScene extends Phaser.Scene {
     for (const npc of this.npcs) {
       const s = npc.sprite;
       if (!s.active) continue;
+
+      if (
+        npc.name === this.imposterName &&
+        this.lastRemainingMs <= HUNT_AT_REMAINING_MS
+      ) {
+        this.updateImposterHunt(npc);
+        continue;
+      }
+
       npc.chatZone.setPosition(s.x, s.y + 2);
 
       if (npc.isWaiting) {
@@ -999,6 +1288,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private tryInteract() {
+    if (this.inputFrozen) return;
     if (this.interactCooldown > this.time.now) return;
     if (!this.nearest) return;
     this.interactCooldown = this.time.now + 250;
@@ -1016,6 +1306,7 @@ export class IslandScene extends Phaser.Scene {
       needed: PUZZLE_ORDER.length,
     });
     gameBus.emit("dialog:show", { speaker: "Teemo", lines: def.solved });
+    this.playSfx(ASSET_KEYS.sfxLevelClear, 0.35);
 
     if (this.collectedCharms.size === PUZZLE_ORDER.length) {
       gameBus.emit("objective:update", {
@@ -1027,19 +1318,38 @@ export class IslandScene extends Phaser.Scene {
         gameBus.emit("objective:update", { text: PUZZLES[next].objective });
       }
     }
+    this.refreshChestPrompt();
   }
 
   update() {
     if (!this.player) return;
+
+    if (
+      this.gardenCommitDeadline !== null &&
+      !this.collectedCharms.has(PUZZLE_IDS.garden)
+    ) {
+      if (this.time.now >= this.gardenCommitDeadline) {
+        this.failGardenCommitTimedOut();
+      } else if (this.gardenBarFill?.visible) {
+        const left = Math.max(0, this.gardenCommitDeadline - this.time.now);
+        this.gardenBarFill.width = this.gardenBarMaxW * (left / GARDEN_COMMIT_MS);
+      }
+    }
+
     this.updateNpcWanderers();
+    const canMove = !this.inputFrozen;
     const left =
-      this.cursors.left?.isDown || this.wasd.A.isDown || this.virtualInput.left;
+      canMove &&
+      (this.cursors.left?.isDown || this.wasd.A.isDown || this.virtualInput.left);
     const right =
-      this.cursors.right?.isDown || this.wasd.D.isDown || this.virtualInput.right;
+      canMove &&
+      (this.cursors.right?.isDown || this.wasd.D.isDown || this.virtualInput.right);
     const up =
-      this.cursors.up?.isDown || this.wasd.W.isDown || this.virtualInput.up;
+      canMove &&
+      (this.cursors.up?.isDown || this.wasd.W.isDown || this.virtualInput.up);
     const down =
-      this.cursors.down?.isDown || this.wasd.S.isDown || this.virtualInput.down;
+      canMove &&
+      (this.cursors.down?.isDown || this.wasd.S.isDown || this.virtualInput.down);
 
     let vx = 0;
     let vy = 0;
@@ -1064,10 +1374,19 @@ export class IslandScene extends Phaser.Scene {
       this.player.setScale(1, 1);
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.wasd.E) || Phaser.Input.Keyboard.JustDown(this.wasd.SPACE)) {
+    if (canMove && (Phaser.Input.Keyboard.JustDown(this.wasd.E) || Phaser.Input.Keyboard.JustDown(this.wasd.SPACE))) {
       this.tryInteract();
     }
 
     this.updateNearestInteractable();
+  }
+
+  private playSfx(key: string, volume = 0.4) {
+    try {
+      if (!this.sound || !this.cache.audio.exists(key)) return;
+      this.sound.play(key, { volume });
+    } catch {
+      // Ignore one-off audio lifecycle errors across sleep/wake transitions.
+    }
   }
 }

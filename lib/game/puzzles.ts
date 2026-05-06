@@ -22,10 +22,10 @@ export const PUZZLES: Record<PuzzleId, PuzzleDefinition> = {
     intro: [
       "Welcome to the old library, little traveler.",
       "The Memory Codex glows with six rune words.",
-      "Remember the light sequence and repeat it correctly.",
+      "Watch the preview — then echo it back in the same order.",
     ],
     solved: ["You picked up the SUN CHARM.", "Where to next?"],
-    objective: "Solve the Memory Codex sequence in the library",
+    objective: "Repeat the Memory Codex rune sequence in the library",
     symbol: "sun",
   },
   [PUZZLE_IDS.garden]: {
@@ -34,14 +34,14 @@ export const PUZZLES: Record<PuzzleId, PuzzleDefinition> = {
     charmLabel: "Leaf Charm",
     intro: [
       "Four crop tiles bloom in a row.",
-      "An old gardener's note: 'Wake them in order — TINY, SHORT, TALL, BLOOM.'",
-      "Step on the right tile first.",
+      "The sprouts rise to different heights — the soil remembers a marching order.",
+      "Step wisely; you only have one window once you begin.",
     ],
     solved: [
       "The crops chime in harmony.",
       "A LEAF CHARM sprouts up from the soil!",
     ],
-    objective: "Step on the crops in the right order",
+    objective: "Read the garden and step the crops in the true order — quickly",
     symbol: "leaf",
   },
   [PUZZLE_IDS.caverns]: {
@@ -50,10 +50,10 @@ export const PUZZLES: Record<PuzzleId, PuzzleDefinition> = {
     charmLabel: "Wave Charm",
     intro: [
       "Inside the cavern, gravity pulls everything down.",
-      "Climb the platforms and grab the WAVE CHARM at the top.",
+      "Cold water chases from below — climb before it catches you.",
     ],
     solved: ["You snatched the WAVE CHARM mid-air!", "Back to the island."],
-    objective: "Climb the cavern and grab the wave charm",
+    objective: "Outrun the flood and grab the wave charm",
     symbol: "wave",
   },
   [PUZZLE_IDS.shrine]: {
@@ -62,14 +62,14 @@ export const PUZZLES: Record<PuzzleId, PuzzleDefinition> = {
     charmLabel: "Moon Charm",
     intro: [
       "Four pillars hum at the shrine.",
-      "Each pillar cycles symbols: SUN, LEAF, WAVE, MOON.",
-      "Set them in the order Teemo discovered.",
+      "Each pillar cycles ancient symbols.",
+      "Match what the honest island cats remember.",
     ],
     solved: [
       "The pillars sing in unison...",
       "The final clue is unlocked! Open the central chest for the number!",
     ],
-    objective: "Arrange the four pillars: SUN, LEAF, WAVE, MOON",
+    objective: "Tune all four pillars to the true island order",
     symbol: "moon",
   },
 };

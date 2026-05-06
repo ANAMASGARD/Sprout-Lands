@@ -18,6 +18,10 @@ export const ASSET_KEYS = {
   playButton: "play_button",
   settingsMenu: "settings_menu",
   settingsButtons: "settings_buttons",
+  jamDialogMedium: "jam_dialog_medium",
+  sfxCropPop: "sfx_crop_pop",
+  sfxJump: "sfx_jump",
+  sfxLevelClear: "sfx_level_clear",
 } as const;
 
 export type AssetKey = (typeof ASSET_KEYS)[keyof typeof ASSET_KEYS];
@@ -42,6 +46,10 @@ export const ASSET_PATHS: Record<AssetKey, string> = {
   play_button: "/assets/sprout/ui/play_button.png",
   settings_menu: "/assets/sprout/ui/settings.png",
   settings_buttons: "/assets/sprout/ui/settings_buttons.png",
+  jam_dialog_medium: "/assets/sprout/jam/premade_dialog_medium.png",
+  sfx_crop_pop: "/assets/audio/mixkit-video-game-blood-pop-2361.wav",
+  sfx_jump: "/assets/audio/mixkit-player-jumping-in-a-video-game-2043.wav",
+  sfx_level_clear: "/assets/audio/mixkit-video-game-treasure-2066.wav",
 };
 
 export const EMOJI_FRAMES = {

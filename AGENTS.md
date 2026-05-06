@@ -26,11 +26,14 @@ This repo uses Next.js 16 App Router. Before changing framework behavior, read t
   - `MobileControls.tsx`: virtual joystick + interact controls; emits event-bus input.
   - `MusicControls.tsx`: in-game music toggle/player.
   - `MysterySolved.tsx`: final reward reveal overlay.
+  - `GameOverOverlay.tsx`: run-fail overlay (switches by typed loss cause).
+  - `ImposterTrialOverlay.tsx`: non-pausing accusation UI from Whisper Stone.
 - `lib/game/`
   - `constants.ts`: gameplay constants (grid, speed, viewport, IDs, order, reward env read).
   - `puzzles.ts`: puzzle metadata (labels, objective copy, charm text/symbols).
   - `assets.ts`: canonical asset keys/paths/frame maps.
   - `eventBus.ts`: typed bridge between Phaser and React.
+  - `npcDialog.ts`: curated truth/lie/paranoia NPC clue pools.
   - `scenes/`
     - `BootScene.ts`: preload assets and start island.
     - `IslandScene.ts`: primary exploration hub, puzzle progression state, chest win condition.
@@ -57,16 +60,24 @@ This repo uses Next.js 16 App Router. Before changing framework behavior, read t
 - Handles most dialog narrative and proximity-based interaction prompts.
 - Launches side scenes (`LibraryScene`, `CavernsScene`) and resumes on return.
 - Controls shrine/chest progression and emits final `mystery:solved` when all puzzle conditions pass.
+- Starts global run timer via `run:started` and tracks timer ticks.
+- Owns Imposter systems: random imposter pick, clue dialog variance, Hunt Mode trigger, Whisper Stone accusation handling.
+- Owns HP economy updates (`hp:update`) and emits typed `game:lost` on failure conditions.
+- Garden puzzle now uses a per-run random order with a commit window timer + penalty.
 
 ### `LibraryScene.ts` (rune sequence challenge)
 - Top-down mini-scene.
 - Player interacts with runes in correct sequence.
 - On completion, emits return event and wakes island scene with `collected` result.
+- Respects `input:freeze` so game-over state cannot move/interact.
 
 ### `CavernsScene.ts` (platformer challenge)
 - Gravity scene with horizontal movement + jump.
 - Player collects wave charm via traversal.
 - On completion, emits return event and wakes island scene with `collected` result.
+- Adds rising flood hazard with sine-wave surface and backward-motion acceleration.
+- Emits typed `game:lost` with cause `flood` on drown.
+- Plays jump SFX on successful jumps.
 
 ### Motion logic locations (important)
 - Island movement loop: `lib/game/scenes/IslandScene.ts` in `update()`.
@@ -80,18 +91,29 @@ This repo uses Next.js 16 App Router. Before changing framework behavior, read t
 - Progress is scene-memory state in `IslandScene` (not persisted across refresh).
 - High-level progression:
   1) Solve library/cottage puzzle charm.
-  2) Solve garden stepping-order charm.
+  2) Solve garden charm (randomized step order each run, time-window constrained).
   3) Solve caverns traversal charm.
   4) Solve shrine symbol-order charm (gated by prior charms).
   5) Open chest and emit solved event with reward payload.
+- Optional shortcut currently implemented: correct imposter accusation can auto-resolve shrine alignment.
 
 ## Event bus contract (authoritative integration layer)
 - Event definitions live in `lib/game/eventBus.ts`.
 - Core events currently used in app flow:
+  - `run:started`
+  - `run:stopped`
+  - `timer:tick`
+  - `pressure:penalty`
+  - `pressure:bonus`
+  - `game:lost`
   - `objective:update`
   - `dialog:show`
   - `charm:collected`
   - `hp:update`
+  - `imposter:accuse-open`
+  - `imposter:accuse-pick`
+  - `imposter:hunt-start`
+  - `input:freeze`
   - `mystery:solved`
   - `scene:enter`
   - `scene:return-from-caverns`
@@ -106,7 +128,7 @@ This repo uses Next.js 16 App Router. Before changing framework behavior, read t
 ## Asset layout and loading rules
 - Runtime assets are in `public/assets`.
 - Key subfolders:
-  - `public/assets/audio/`: background music.
+  - `public/assets/audio/`: background music + gameplay SFX (crop pop, jump, level-clear).
   - `public/assets/sprout/buttons/`
   - `public/assets/sprout/dialog/`
   - `public/assets/sprout/emotes/`
@@ -115,6 +137,7 @@ This repo uses Next.js 16 App Router. Before changing framework behavior, read t
   - `public/assets/sprout/inventory/`
   - `public/assets/sprout/sprites/`
   - `public/assets/sprout/ui/`
+  - `public/assets/sprout/jam/`: jam-specific imported pack assets (e.g. trial dialog frame).
 - Asset key/path canonical map is `lib/game/assets.ts`; keep scene loader usage aligned to this file.
 - `BootScene.ts` is the central preload owner; avoid ad-hoc loading in multiple scenes unless justified.
 
@@ -131,13 +154,17 @@ This repo uses Next.js 16 App Router. Before changing framework behavior, read t
 - `VIEW_W`/`VIEW_H` in `lib/game/constants.ts` are layout-critical for camera and overlays.
 - Keep `scene:enter` behavior consistent so shell/HUD styling reflects active scene.
 - Preserve pixel-art readability and avoid overlays covering core interactables.
+- Game-over UX is typed by cause (`timeout`, `flood`, `imposter-contact`, `wrong-accusation-hp`); branch on cause, not reason strings.
+- Keep timer authority in React (`GameShell`) so countdown continues while scenes sleep.
+- `ImposterTrialOverlay` must remain non-pausing for intended tension.
 
 ## Known pitfalls and context future agents should keep
 - `LibraryScene` corresponds to the `cottage` puzzle ID (name mismatch can confuse edits).
-- Some typed events exist but are currently not materially used (`ready`, `dialog:hide`).
+- Some typed events remain lightly used (`ready`, `dialog:hide`).
 - Puzzle progression is not persisted (refresh resets run).
 - Reward flow currently reveals public data by design.
 - License constraints from asset pack are non-commercial; do not suggest redistribution.
+- Avoid storing long-lived Phaser sound instances across scene lifecycle boundaries; prefer one-shot `this.sound.play(...)` to avoid stale sound-object runtime errors.
 
 ## Dev/build/lint workflow
 - Install: `npm install`

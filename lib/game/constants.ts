@@ -7,6 +7,28 @@ export const VIEW_W = 960;
 export const VIEW_H = 640;
 export const PLAYER_SPEED = 150;
 
+/** Full run length when IslandScene starts (ms). */
+export const RUN_DURATION_MS = 10 * 60 * 1000;
+/** HUD pulse / warn styling below this (ms). */
+export const TIMER_WARN_MS = 2 * 60 * 1000;
+/** Imposter begins hunting at or below this remaining time (ms). */
+export const HUNT_AT_REMAINING_MS = 4 * 60 * 1000;
+/** Honest NPC lines become hedged below this (ms). */
+export const PARANOIA_AT_REMAINING_MS = 3 * 60 * 1000;
+/** After first correct garden tile, finish all four within this (ms). */
+export const GARDEN_COMMIT_MS = 6500;
+/** Time shaved on garden commit fail (seconds, applied via bus). */
+export const PRESSURE_PENALTY_GARDEN_FAIL_SEC = 40;
+export const HP_MAX = 3;
+/** Star 2: chest opened with at least this many ms left. */
+export const STAR_2_REMAINING_MS = 3 * 60 * 1000;
+/** Star 3: plus correct imposter accusation before end; need at least this ms left. */
+export const STAR_3_REMAINING_MS = 4 * 60 * 1000;
+/** Cavern rising flood (world px per second). */
+export const FLOOD_RISE_BASE_PX = 10;
+/** Extra rise when player moves left (don't look back). */
+export const FLOOD_RISE_BACK_VX_MULT = 0.04;
+
 export const COLORS = {
   grassLight: 0xc6dca8,
   grassMid: 0x9dc878,

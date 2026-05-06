@@ -49,6 +49,10 @@ export class BootScene extends Phaser.Scene {
     load.image(ASSET_KEYS.playButton, ASSET_PATHS.play_button);
     load.image(ASSET_KEYS.settingsMenu, ASSET_PATHS.settings_menu);
     load.image(ASSET_KEYS.settingsButtons, ASSET_PATHS.settings_buttons);
+    load.image(ASSET_KEYS.jamDialogMedium, ASSET_PATHS.jam_dialog_medium);
+    load.audio(ASSET_KEYS.sfxCropPop, ASSET_PATHS.sfx_crop_pop);
+    load.audio(ASSET_KEYS.sfxJump, ASSET_PATHS.sfx_jump);
+    load.audio(ASSET_KEYS.sfxLevelClear, ASSET_PATHS.sfx_level_clear);
     load.image(
       ASSET_KEYS.smallSquareButtons,
       ASSET_PATHS.small_square_buttons,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { TIMER_WARN_MS } from "@/lib/game/constants";
 import { gameBus } from "@/lib/game/eventBus";
 
 type Charm = { id: string; label: string };
@@ -15,6 +16,7 @@ export default function HudOverlay() {
   );
   const [charms, setCharms] = useState<Charm[]>([]);
   const [needed, setNeeded] = useState(4);
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
 
   useEffect(() => {
     const off1 = gameBus.on("hp:update", (p) => setHp(p));
@@ -26,17 +28,40 @@ export default function HudOverlay() {
       );
       setNeeded(p.needed);
     });
+    const offTick = gameBus.on("timer:tick", ({ remainingMs: ms }) => {
+      setRemainingMs(ms);
+    });
     return () => {
       off1();
       off2();
       offScene();
       off3();
+      offTick();
     };
   }, []);
+
+  const warn =
+    remainingMs !== null && remainingMs > 0 && remainingMs <= TIMER_WARN_MS;
+  const mm =
+    remainingMs === null
+      ? "--:--"
+      : `${String(Math.floor(remainingMs / 60000)).padStart(2, "0")}:${String(
+          Math.floor((remainingMs % 60000) / 1000),
+        ).padStart(2, "0")}`;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 select-none font-pixel text-[#4a3528]">
       <div className="absolute top-3 left-3 flex flex-col gap-2">
+        {remainingMs !== null && remainingMs >= 0 && (
+          <div
+            className={`pixel-panel flex items-center justify-center px-3 py-2 text-sm font-bold tabular-nums ${
+              warn ? "animate-pulse text-[#a52a2a]" : ""
+            }`}
+          >
+            <span className="mr-2 uppercase tracking-wider text-[10px]">Time</span>
+            {mm}
+          </div>
+        )}
         <div className="pixel-panel flex items-center gap-1 px-3 py-2 text-base">
           {Array.from({ length: hp.max }).map((_, i) => (
             <span

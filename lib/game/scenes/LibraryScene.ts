@@ -42,6 +42,7 @@ export class LibraryScene extends Phaser.Scene {
   private locked = false;
   private statusText!: Phaser.GameObjects.Text;
   private sequenceText!: Phaser.GameObjects.Text;
+  private inputFrozen = false;
 
   constructor() {
     super("LibraryScene");
@@ -83,8 +84,15 @@ export class LibraryScene extends Phaser.Scene {
       gameBus.on("input:virtual", (state) => {
         this.virtualInput = state;
       }),
+      gameBus.on("input:freeze", ({ frozen }) => {
+        this.inputFrozen = frozen;
+        if (frozen) {
+          this.player.setVelocity(0, 0);
+          this.virtualInput = { left: false, right: false, up: false, down: false };
+        }
+      }),
       gameBus.on("input:interact", () => {
-        this.tryInteract();
+        if (!this.inputFrozen) this.tryInteract();
       }),
     );
 
@@ -375,6 +383,7 @@ export class LibraryScene extends Phaser.Scene {
   }
 
   private tryInteract() {
+    if (this.inputFrozen) return;
     if (!this.nearest || this.exiting || this.locked) return;
     this.nearest.onInteract();
   }
@@ -394,14 +403,19 @@ export class LibraryScene extends Phaser.Scene {
   update() {
     if (!this.player || this.exiting) return;
 
+    const canMove = !this.inputFrozen;
     const left =
-      this.cursors.left?.isDown || this.wasd.A.isDown || this.virtualInput.left;
+      canMove &&
+      (this.cursors.left?.isDown || this.wasd.A.isDown || this.virtualInput.left);
     const right =
-      this.cursors.right?.isDown || this.wasd.D.isDown || this.virtualInput.right;
+      canMove &&
+      (this.cursors.right?.isDown || this.wasd.D.isDown || this.virtualInput.right);
     const up =
-      this.cursors.up?.isDown || this.wasd.W.isDown || this.virtualInput.up;
+      canMove &&
+      (this.cursors.up?.isDown || this.wasd.W.isDown || this.virtualInput.up);
     const down =
-      this.cursors.down?.isDown || this.wasd.S.isDown || this.virtualInput.down;
+      canMove &&
+      (this.cursors.down?.isDown || this.wasd.S.isDown || this.virtualInput.down);
 
     let vx = 0;
     let vy = 0;
@@ -418,7 +432,11 @@ export class LibraryScene extends Phaser.Scene {
     if (vx < 0) this.player.setFlipX(false);
     else if (vx > 0) this.player.setFlipX(true);
 
-    if (Phaser.Input.Keyboard.JustDown(this.wasd.E) || Phaser.Input.Keyboard.JustDown(this.wasd.SPACE)) {
+    if (
+      canMove &&
+      (Phaser.Input.Keyboard.JustDown(this.wasd.E) ||
+        Phaser.Input.Keyboard.JustDown(this.wasd.SPACE))
+    ) {
       this.tryInteract();
     }
 
